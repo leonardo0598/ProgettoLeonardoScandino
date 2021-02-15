@@ -1,0 +1,542 @@
+---
+title: "ProgettoScandino"
+author: "Leonardo Scandino"
+date: "15/2/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+###-------Caricamento librerie e csv
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(gapminder)
+library(gganimate)
+library(data.table)
+library(shiny)
+library(plotly)
+library(ggrepel)
+suicide.test <- fread('./master.csv', header = T, sep=',', data.table = F)
+happy.test.15 <- fread('./datasets_894_813759_2015.csv', header = T, sep=',', data.table = F)
+
+
+```
+
+
+
+###-------Introduzione
+Informazioni sui Dataset:
+
+  Suicide Rates Overview 1985 to 2016 -> Dataset di kaggle che raccoglie i suicidi nel range di anni tra '85 e il '16. Al suo interno          raccoglie diverse variabili, quelle utilizzate nel seguente progetto sono: country, year, sex, age, suicides_no, population, generation.
+  
+  World Happiness report 2015 -> Dataset di kaggle che raccoglie il livello di felicità di molteplici paesi, al suo interno presenta il        livello di Happiness score e le variabili che lo formano : GDP per Capita, Family, Health, Freedom, Government Corruption, Generosity,       Dystopia Residual. Questi parametri sono assocciati a country e region. 
+  
+Il fine di questo progetto è analizzare i dati relativi hai suicidi dall'anno 1985 al 2016 dei vari paesi e trovare informazioni interessanti sull'argomento. Successivamente intersecare a questi dati il dataset World Happiness e vedere se ci sono relazioni tra i due argomenti.
+
+
+
+###-------Analisi globale sui suicidi
+
+##--1
+Per iniziare filtriamo i 10 paesi con tasso di suicidio più alto (dal 1985-2016).
+Notiamo subito che la Lithuania ha un tasso di suicidio molto elevato e si posiziona al primo posto
+
+```{r message=FALSE}
+suicideGlobale <- suicide.test %>%
+  group_by(country) %>%
+  summarise(n_suicides = sum(suicides_no), tot_pop = sum(as.numeric(population)), Tasso_suicide_global = (n_suicides/tot_pop)*100) %>%
+  arrange(-Tasso_suicide_global)%>%
+  select(country, n_suicides, Tasso_suicide_global)%>%
+  head(10)%>%
+  ggplot()+
+  geom_col(aes(country, Tasso_suicide_global))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  labs(y="Suicide rate")
+
+suicideGlobale
+```
+
+
+##--2
+In seguito scopriamo il tasso di suicidio globale tra maschi e femmine (dal 1985-2016).
+I maschi hanno un tasso molto più alto delle femmine ( 0.77 contro 0.23)
+
+```{r message=FALSE}
+tot_suicides <- suicide.test %>% summarise(sum(suicides_no))
+
+MeF_globale <-suicide.test %>%
+  group_by(sex) %>%
+  count(sumsuicide = sum(suicides_no))%>%
+  select(sex, sumsuicide) %>%
+  mutate(percent= sumsuicide/as.numeric(tot_suicides))%>%
+  ggplot(aes(sex,percent) )+
+  geom_col()+
+  labs(x = "Sex", y = "Percent")
+
+MeF_globale
+```
+
+Approfondiamo questo aspetto e osserviamo l'andamento dei suicidi tra maschi e femmine anno per anno.
+Confermando che il tasso di suicidio dei maschi è sempre più alto di quello delle femmine e evidenziando un picco nell'anno 1995
+
+```{r message=FALSE}
+MeF_per_anno <-suicide.test %>%
+  group_by(year, sex) %>% #per avere le generazioni aggiungi age nei gruppi
+  summarise(suicides = sum(suicides_no), totPopulation = sum(population))%>%
+  mutate(Tasso_per_anno = suicides/totPopulation*100) %>%
+  ggplot(aes(year,Tasso_per_anno, color = sex))+
+  geom_line()+
+  labs(x = "Years", y = "Suicide rate")
+
+MeF_per_anno
+```
+
+Eseguiamo la stessa tipologia di analisi mettendo in evidenza le classi d'età.
+Notiamo che la generazione over 75 è quella con tasso di suicidio più alto (con un massimo nel 1990) mentre si evidenzia un picco generale nel 1995, complessivamente però il tasso è in discesa.
+
+```{r message=FALSE}
+age_order <- unique(suicide.test$age)[c(3,5,2,4,1,6)] #ordino i nomi delle classi per mettere in ordine i nomi nella legenda del grafico
+
+
+Generation_per_anno <- suicide.test %>%
+  mutate(age = fct_relevel(age, age_order)) %>%
+  group_by(year, age) %>%
+  summarise(suicides = sum(suicides_no), totPopulation = sum(population))%>%
+  mutate(Tasso_per_anno = suicides/totPopulation*100) %>%
+  ggplot(aes(year,Tasso_per_anno, color = age))+
+  geom_line()+
+  labs(x = "Years", y = "Suicide rate") 
+
+Generation_per_anno
+  
+```
+
+##3--
+
+Creiamo una Shiny app che evidenzia la percentuale di suicidi globali per tutti gli anni disponibili (cercando di confermare  la Lithuania come primo posto)
+
+```{r message=FALSE, warning=FALSE}
+#costruzione dataset con dati ragruppati per anno e country con aggiunta di Tasso globale in percentuale
+prova <- suicide.test %>%
+   group_by(country, year) %>%
+  summarise(tot_global_suicides= sum(suicides_no), tot_population = sum(population), Tasso_suicide_global = tot_global_suicides/tot_population*100)
+
+```
+
+ShinyApp
+```{r message=FALSE}
+# Define UI for app that draws a histogram ----
+ui <- fluidPage(
+
+  # App title ----
+  titlePanel("Tasso di suicidi di ogni paese per ogni anno"),
+
+  # Sidebar layout with input and output definitions ----
+  sidebarLayout(
+
+    # Sidebar panel for inputs ----
+    sidebarPanel(
+
+      # Input: Slider for the number of bins ----
+      
+      numericInput("num", 
+                        h3("Seleziona l'anno"), 
+                        value = 2000, min = 1985, max = 2016))
+
+    ,
+
+    # Main panel for displaying outputs ----
+    mainPanel(
+
+      plotOutput("MyPlot")
+
+    )
+  )
+)
+server <- function(input, output) {
+
+  output$MyPlot <- renderPlot({
+    
+    max_y <- max(prova$Tasso_suicide_global) + 0.01
+    
+ggplot(prova %>% filter(year== input$num))+ 
+  
+  geom_point(aes(country, Tasso_suicide_global))+
+  labs(x="Country" ,y = "Suicide rate")+
+  guides(x= "none")+
+  
+  
+  geom_point(data= prova %>%
+              filter(year== input$num) %>%
+              filter(Tasso_suicide_global>0.03), aes(country, Tasso_suicide_global), color= "red", vjust = -1) +
+        
+  
+  geom_label_repel(data= prova %>%
+              filter(year== input$num) %>%
+              filter(Tasso_suicide_global>0.03),
+              aes(country, Tasso_suicide_global,
+                  label = country), box.padding = 0.5, 
+                  point.padding = 0.3,
+                  segment.color = 'blue', color= "red")+
+  
+  ylim(0, max_y)
+
+  })
+
+}
+SHINY_TUTTI_DATI <- shinyApp(ui = ui, server = server)
+
+SHINY_TUTTI_DATI
+```
+
+dato che nell'asse x i paesi non sono sempre gli stessi ho preso in considerazione un sottonsieme comune più ampio possibile (perdendo ovviamente alcuni paesi)
+
+```{r message=FALSE}
+#Estrae il sottoinsieme comune di country presente negli anni dal 1995-2015 in mondo da avere gli stessi elementi in asse x
+country_common <- list()
+
+for (y in c(1995:2015)){
+  c_perYear <- prova %>%
+    filter(year == y) %>%
+    select(country)
+  country_common[as.character(y)] <- c_perYear
+}
+c_common <- Reduce(intersect, country_common)
+
+
+suicide.common <- prova%>%
+  group_by(country)%>%
+  filter(year>=1995 & year<2016)%>%
+  filter(country %in% c(c_common))
+
+```
+
+
+Analisi che utilizza come asse x un sottoinsieme comune per ogni anno dal '95 al '15
+
+
+```{r message=FALSE}
+# Define UI for app that draws a histogram ----
+ui <- fluidPage(
+
+  # App title ----
+  titlePanel("Tasso di suicidi di ogni paese per ogni anno"),
+
+  # Sidebar layout with input and output definitions ----
+  sidebarLayout(
+
+    # Sidebar panel for inputs ----
+    sidebarPanel(
+
+      # Input: Slider for the number of bins ----
+      
+      numericInput("num", 
+                        h3("Seleziona l'anno"), 
+                        value = 2000, min = 1995, max = 2015))
+
+    ,
+
+    # Main panel for displaying outputs ----
+    mainPanel(
+
+      plotOutput("MyPlot")
+
+    )
+  )
+)
+server <- function(input, output) {
+
+  output$MyPlot <- renderPlot({
+    
+    max_y <- max(suicide.common$Tasso_suicide_global) + 0.01
+    
+ggplot(suicide.common %>% filter(year== input$num))+ 
+  
+  geom_point(aes(country, Tasso_suicide_global))+
+  labs(x="Country" ,y = "Suicide rate", title = "Sottoinsieme comune di Country per ogni anno")+
+  guides(x= "none")+
+  
+  geom_point(data= suicide.common %>%
+              filter(year== input$num) %>%
+              filter(Tasso_suicide_global>0.03), aes(country, Tasso_suicide_global), color= "red", vjust = -1) +
+  
+   geom_label_repel(data= suicide.common %>%
+              filter(year== input$num) %>%
+              filter(Tasso_suicide_global>0.03),
+              aes(country, Tasso_suicide_global,
+                  label = country), box.padding = 0.5, 
+                  point.padding = 0.3,
+                  segment.color = 'blue', color= "red")+
+  
+  ylim(0, max_y)
+
+  })
+
+}
+SHINY_SOTTOINSIEME_COMUNE <- shinyApp(ui = ui, server = server)
+SHINY_SOTTOINSIEME_COMUNE
+
+```
+
+
+
+
+###-------Analisi specifica per anno 2015
+
+
+Non avendo un dataset di World Happiness degli anni 90 (dataset non esistente) studiamo il 2015 per vedere se ci sono relazioni tra i suicidi e il livello di felicità(o dei singoli fattori utilizzati per calcolarlo)
+
+Iniziamo con una breve analisi sui suicidi del 2015
+
+
+
+##1-- 
+
+Filtriamo i 10 Paesi con Tasso di suicidio più alto nel 2015
+
+
+```{r message=FALSE}
+suicide2015 <- suicide.test %>%
+  group_by(country,year) %>%
+  filter(year == '2015')%>%
+  summarise(n_suicides = sum(suicides_no), tot_pop = sum(as.numeric(population)), Tasso_suicide_global = (n_suicides/tot_pop)*100) %>%
+  arrange(-Tasso_suicide_global)%>%
+  select(country,year, n_suicides, Tasso_suicide_global)%>%
+  head(10)%>%
+  ggplot()+
+  geom_col(aes(country, Tasso_suicide_global))+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  labs(y="Suicide rate")
+
+suicide2015
+```
+
+##2--
+
+Utilizzando il nostro dataset specifico del 2015, confrontiamo i tassi di suicidio tra maschi e femmine
+notiamo che i valori non si discostano da quello osservato nell'analisi globale, infatti  rimangono 0.77 e 0.23
+
+```{r message=FALSE}
+tot_suicides_2015 <- suicide.test %>% filter(year == '2015') %>% summarise(sum(suicides_no)) 
+
+sex2015 <- suicide.test %>%
+  group_by(sex) %>%
+  filter(year == '2015')%>%
+  count(sumsuicide = sum(suicides_no)) %>%
+  select(sex, sumsuicide) %>%
+  mutate(percent = sumsuicide/as.numeric(tot_suicides_2015))%>%
+  
+  ggplot(aes(sex,percent) )+
+  geom_col()+
+  labs(x = "Sex", y = "Suicide rate")
+
+sex2015
+```
+
+##3--
+
+L'ultimo aspetto che osserviamo in questa fase è quello delle classi
+Anche qui si può notare che il tasso degli over 75 è molto alto rispetto a quello delle altre classi
+
+```{r message=FALSE}
+age_order <- unique(suicide.test$age)[c(3,5,2,4,1,6)] #ordino i nomi delle classi per mettere in ordine i nomi nella legenda del grafico
+
+
+
+age2015 <- suicide.test%>%
+  filter(year=='2015')%>%
+  mutate(age = fct_relevel(age, age_order))%>%
+  group_by(age)%>%
+  summarise(tot_population=sum(population),tot_suicide=sum(suicides_no),Tasso_suicide= tot_suicide/tot_population*100)%>%
+  ggplot(aes(age,Tasso_suicide))+geom_col()+
+  labs(y="Suicide rate")
+
+age2015
+```
+
+
+###-------Analisi che cerca una relazione tra suicidi e livello di felicità(o delle sue variabili)
+
+Intersechiamo i nostri due dataset e correggiamo lle variabili per le nostre analisi finali
+
+```{r message=FALSE}
+#rinomino colonna di suicide.test
+suicide.test <- suicide.test%>%
+  rename('gdp_per_capita' = 'gdp_per_capita ($)')
+```
+
+```{r message=FALSE}
+#costruzione di una tabella suicide.2015 che raggruppa i country con la somma di tutti i suicidi e popolazioni
+suicide.2015 <- suicide.test %>%
+  filter(year == 2015) %>%
+  group_by(country) %>%
+  summarize(suicides = sum(suicides_no), Population = sum(population), Tasso_suicide_global = (suicides/Population)*100, gdp_per_capita= sum(gdp_per_capita))
+
+```
+
+```{r message=FALSE}
+#rinomino le colonne per poter avere lo stesso nome per il join
+happy.test.15 <- happy.test.15%>%
+  rename( 'country' = 'Country',
+          'Happiness_score'= 'Happiness Score',
+          'Happiness_Rank' = 'Happiness Rank',
+         'Economy_GDP_perCapita' ='Economy (GDP per Capita)',
+         'Life_Expectancy' ='Health (Life Expectancy)',
+         'Government_Corruption' ='Trust (Government Corruption)')
+
+```
+
+```{r message=FALSE}
+#inner-join tra la tabella creata e quella degli happy
+happy.suicide <- inner_join(suicide.2015,happy.test.15, by= 'country')
+```
+
+
+##1--
+
+
+Mettendo a confronto il tasso di suicidio e il livello di felicità notiamo che non sembrerebbe esserci nessun tipo di collegamento tra i due,
+anzi si nota che molti paesi con molti suicidi sono felici e molti paesi con pochi suicidi non sono felici.
+
+Per facilitare la visualizzazione i livelli di felicità più bassi sono stati colorati di rosso
+
+
+```{r message=FALSE}
+happy.suicide%>%
+  ggplot()+
+  geom_point(data= happy.suicide%>%
+               filter(Happiness_score >= 5.5),aes(country, Tasso_suicide_global, size = Happiness_score))+
+   geom_point(data= happy.suicide%>%
+               filter(Happiness_score < 5.5 ),aes(country, Tasso_suicide_global) ,color= "red")+
+   guides(x="none")+ labs(y="Suicide rate")
+```
+
+
+##2--
+
+Cercando delle correlazioni più significative proviamo a cambiare i nostri assi con gdp per capita e Freedom, applicando un colore sul livello di felicità e un size sul Tasso di suicidio notiamo qualcosa. Generalmente i paesi con freedom e gdp basso hanno un tasso di suicidio elevato  e un livello di felicità minore.
+
+```{r message=FALSE}
+  PlotFREEGDP <- happy.suicide%>%
+  ggplot(aes(gdp_per_capita, Freedom ))+
+  geom_point(aes(size = Tasso_suicide_global, color= Happiness_score), alpha=.8)+
+  labs(x="gdp per capita")
+
+PlotFREEGDP
+```
+
+Ovviamento il livello di suicidio è abbastanza distribuito nel nostro grafico 
+ma se inseriamo un filtro sui top 8 per tasso di suicidi cinque di questi sono presenti in basso a sinistra
+
+```{r message=FALSE}
+  critici_top8 <- happy.suicide %>%
+  top_n(8,wt=Tasso_suicide_global)
+
+  PlotFREEGDP_8 <- happy.suicide%>%
+  ggplot(aes(gdp_per_capita, Freedom ))+
+  geom_point(aes(size = Tasso_suicide_global, color= Happiness_score), alpha=.8)+
+  ggrepel::geom_label_repel(data = critici_top8, mapping = aes(label = country))+
+  labs(x="gdp per capita")
+
+PlotFREEGDP_8
+```
+
+
+##3--
+
+Osservando i nomi degli top 8 per tasso di suicidio applichiamo un filtro colore sulle regioni e scopriamo che l'insieme dei paesi di centro e est europa sono in basso a sinistra (ovvero quelli con con Tasso di Suicidio più elevato e libertà e gdp minori), l'ovest europa in alto a destra e l'america latina in alto a sinistra(libertà elevata e gdp basso con tasso di suicidio moderato)
+
+
+```{r message=FALSE}
+  PlotFREEGDP_2 <- happy.suicide%>%
+  ggplot(aes(gdp_per_capita, Freedom ))+
+  geom_point(aes(size = Tasso_suicide_global, color= Region),alpha=.8)+
+  labs(x="gdp per capita")
+  
+PlotFREEGDP_2
+```
+
+###-------Analisi per classi nel 2015
+
+Per completare la nostra analisi ampliamo la nostra visione sulle generazioni.
+Quindi modifichiamo il dataset in modo da avere tutti i dati necessari.
+
+
+```{r message=FALSE}
+#Creare dataset osservazioni 2015 suicide e aggiungere dati happy ripetute per 
+#ogni obs di country (suicide)
+suicide.2015.all <- suicide.test %>% filter(year == 2015)
+
+```
+
+```{r message=FALSE}
+#aggiunto colonne di interesse a suicide
+suicide.2015.all[,colnames(happy.test.15)[c(2,4,7,8,9,10,11)] ] <- rep(NA, nrow(suicide.2015))
+
+country_vec <- suicide.2015.all$country[which(suicide.2015.all$country %in% happy.test.15$country)]
+
+for (c in country_vec){
+  new_row <- happy.test.15[which(happy.test.15$country == c),c(2,4,7,8,9,10,11) ]
+  suicide.2015.all[which(suicide.2015.all$country == c),colnames(happy.test.15)[c(2,4,7,8,9,10,11)] ] <- new_row
+}
+```
+
+```{r message=FALSE}
+#Rimuovere obs suicide NA
+suicide.2015.all <- suicide.2015.all[which(!is.na(suicide.2015.all$Happiness_score)),]
+
+suicide.2015.all<- suicide.2015.all %>%
+  rename('suicides_100k'= 'suicides/100k pop')
+
+suicide.2015.all$generation <- factor(suicide.2015.all$generation, levels = c("Silent","Boomers", "Generation X","Millenials", "Generation Z"))
+```
+
+```{r message=FALSE}
+#aggiungo il tasso di suicidi per ogni obs
+suicide.2015.all<- suicide.2015.all %>%
+                    mutate(Tasso_suicide = (suicides_no/population)*100)
+```
+
+
+
+Confronto il Tasso di suicidio e l'Happiness_score per generazioni, possiamo notare che i silent (come già visto) hanno un tasso di suicidio più elevato e che inserendo un filtro sulla gdp per capita confermiamo che i paesi con gdp alto sono sempre felici e difficilmente hanno un tasso di suicidio eleveto.
+
+```{r message=FALSE}
+up <- suicide.2015.all%>%
+  filter(gdp_per_capita >= 50000)
+down <- suicide.2015.all%>%
+  filter(gdp_per_capita < 50000)
+
+ConfSuicHappy <- suicide.2015.all %>%
+ggplot(aes(Tasso_suicide, Happiness_score)) + 
+  geom_point(data= down,aes( color =gdp_per_capita)) +
+  geom_point(data= up,aes( color =gdp_per_capita , size= 0.1)) +
+  facet_wrap(.~generation)+ labs(x="Suicide rate", y="Happiness score")
+ConfSuicHappy
+```
+
+
+
+L'ultimo grafico è una semplice conferma che i silent sono i più propensi al suicidio, e che c'è una lieve correlazione tra libertà gdp e tasso di suicidio
+```{r message=FALSE}
+critici <- suicide.2015.all %>%
+  filter(Tasso_suicide > 0.075)
+nonCritici <- suicide.2015.all %>%
+  filter(Tasso_suicide <= 0.075)
+
+CriticiGraf<-suicide.2015.all%>%
+  ggplot(aes(gdp_per_capita ,Freedom ))+
+  geom_point(data  = nonCritici, aes(`gdp_per_capita`, Freedom))+
+  geom_point(data  = critici, aes(`gdp_per_capita`, Freedom), color = 'red') +
+  labs(x="gdp per capita")+
+  facet_wrap(.~generation)
+
+CriticiGraf
+```
+
+###-------Conclusione
+
+Per concludere si può affermare che la Lithuania si posiziona sempre al primo posto per tasso di suicidio, i maschi hanno un tasso ben tre volte superiore alle femmine e che gli over 75 sono la classe più critica per i suicidi.
+Inoltre, mettendo a confronto i dati per anno, negli anni 90' si nota un picco del tasso di suicidio in diversi paesi.
+Sebbene inizialmente non è stata trovata nessuna correlazione tra livello di felicità e suicidio, abbiamo constatato che mettendo in campo le variabili di libertà e gdp per capita si può confermare anche se non in modo marcato, una relazione.
